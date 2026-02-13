@@ -14,6 +14,18 @@ const store = new NotificationStore(REDIS_URL);
 const polling = new PollingHandlers(REDIS_URL, store);
 const redis = new Redis(REDIS_URL);
 
+// CORS — allow frontend to call API
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 
 // ── Notification Endpoints ──────────────────────────────────────
 

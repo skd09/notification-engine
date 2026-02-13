@@ -1,4 +1,4 @@
-services: 
+services:
   app:
     build: .
     container_name: notification-app
@@ -11,10 +11,10 @@ services:
       REDIS_URL: redis://redis:6379
     depends_on:
       - redis
-  
+
   worker:
     build: .
-    container_name: notfication-worker
+    container_name: notification-worker
     volumes:
       - ./src:/app/src
     environment:
@@ -28,3 +28,13 @@ services:
     container_name: notification-redis
     ports:
       - "6379:6379"
+
+  dashboard:
+    image: node:20-alpine
+    container_name: notification-dashboard
+    ports:
+      - "5174:5173"
+    volumes:
+      - ./frontend/public:/app/public
+    working_dir: /app
+    command: npx serve -s public -l 5173

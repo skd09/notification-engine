@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notification Engine Dashboard</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 { font-size: 20px; }
+    .header h1 span { color: #60a5fa; }
+
+    .header-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .header-controls label { font-size: 13px; color: #94a3b8; }
+    .header-controls select, .header-controls input {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 20px 24px;
+    }
+
+    .grid-full { grid-column: 1 / -1; }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 18px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+
+    .badge-blue { background: #1e3a5f; color: #60a5fa; }
+    .badge-green { background: #14532d; color: #4ade80; }
+    .badge-red { background: #450a0a; color: #f87171; }
+    .badge-yellow { background: #422006; color: #fbbf24; }
+
+    .stat-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    .stat-box {
+      flex: 1;
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-box .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .stat-box .label {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .polling-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .poll-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .poll-card h4 {
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+
+    .poll-card .metric {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+
+    .poll-card .metric span { color: #60a5fa; font-weight: 600; }
+
+    .poll-card .log {
+      margin-top: 10px;
+      max-height: 120px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: 'SF Mono', monospace;
+      color: #64748b;
+    }
+
+    .poll-card .log .entry { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+    .poll-card .log .entry.new { color: #4ade80; }
+
+    .notification-list {
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .notification-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .notification-item:last-child { border-bottom: none; }
+
+    .notification-icon {
+      font-size: 18px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background: #0f172a;
+    }
+
+    .notification-content { flex: 1; }
+    .notification-content .title { font-size: 13px; font-weight: 500; }
+    .notification-content .body { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .notification-content .time { font-size: 11px; color: #475569; margin-top: 4px; }
+
+    .dlq-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px;
+      background: #0f172a;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .dlq-item .error { flex: 1; font-size: 12px; color: #f87171; }
+    .dlq-item .meta { font-size: 11px; color: #64748b; }
+
+    .btn {
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: none;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .btn-blue { background: #2563eb; color: white; }
+    .btn-blue:hover { background: #3b82f6; }
+    .btn-red { background: #dc2626; color: white; }
+    .btn-red:hover { background: #ef4444; }
+    .btn-green { background: #16a34a; color: white; }
+    .btn-green:hover { background: #22c55e; }
+    .btn-ghost { background: transparent; color: #94a3b8; border: 1px solid #334155; }
+    .btn-ghost:hover { background: #334155; }
+
+    .analytics-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .analytics-bar .label { width: 50px; font-size: 12px; color: #94a3b8; }
+    .analytics-bar .bar-bg {
+      flex: 1;
+      height: 24px;
+      background: #0f172a;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .analytics-bar .bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding-left: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+      transition: width 0.5s ease;
+    }
+
+    .bar-email { background: #3b82f6; }
+    .bar-sms { background: #8b5cf6; }
+    .bar-push { background: #f59e0b; }
+
+    .send-form {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .send-form input, .send-form select {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 30px;
+      color: #475569;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const API = 'http://localhost:4000';
+
+    // ── API helpers ───────────────────────────────────────────
+
+    async function api(path, options = {}) {
+      const res = await fetch(`${API}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      return res.json();
+    }
+
+    function channelIcon(channel) {
+      switch (channel) {
+        case 'email': return '📧';
+        case 'sms':   return '📱';
+        case 'push':  return '🔔';
+        default:      return '📨';
+      }
+    }
+
+    function timeAgo(isoString) {
+      const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+      if (seconds < 60) return `${seconds}s ago`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+      return `${Math.floor(seconds / 3600)}h ago`;
+    }
+
+    // ── Send Notification Form ────────────────────────────────
+
+    function SendForm({ userId }) {
+      const [channel, setChannel] = useState('email');
+      const [message, setMessage] = useState('');
+      const [sending, setSending] = useState(false);
+
+      const send = async () => {
+        if (!message) return;
+        setSending(true);
+        await api('/notify', {
+          method: 'POST',
+          body: JSON.stringify({
+            userId,
+            channel,
+            subject: message,
+            body: message,
+            message: message,
+            title: message,
+          }),
+        });
+        setMessage('');
+        setSending(false);
+      };
+
+      return (
+        <div className="send-form">
+          <select value={channel} onChange={e => setChannel(e.target.value)}>
+            <option value="email">📧 Email</option>
+            <option value="sms">📱 SMS</option>
+            <option value="push">🔔 Push</option>
+          </select>
+          <input
+            type="text"
+            placeholder="Notification message..."
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && send()}
+            style={{ flex: 1, minWidth: 200 }}
+          />
+          <button className="btn btn-blue" onClick={send} disabled={sending}>
+            {sending ? 'Queuing...' : 'Send'}
+          </button>
+          <button className="btn btn-ghost" onClick={async () => {
+            for (let i = 1; i <= 5; i++) {
+              api('/notify', {
+                method: 'POST',
+                body: JSON.stringify({
+                  userId,
+                  channel: ['email', 'sms', 'push'][i % 3],
+                  subject: `Burst #${i}`,
+                  body: `Burst message ${i}`,
+                  message: `Burst ${i}`,
+                  title: `Burst #${i}`,
+                }),
+              });
+            }
+          }}>
+            Burst 5
+          </button>
+        </div>
+      );
+    }
+
+    // ── Stats Cards ───────────────────────────────────────────
+
+    function StatsRow({ stats, unread }) {
+      return (
+        <div className="stat-row">
+          <div className="stat-box">
+            <div className="value">{stats.queueSize || 0}</div>
+            <div className="label">Queue Pending</div>
+          </div>
+          <div className="stat-box">
+            <div className="value" style={{ color: '#f87171' }}>{stats.dlqSize || 0}</div>
+            <div className="label">Dead Letters</div>
+          </div>
+          <div className="stat-box">
+            <div className="value" style={{ color: '#4ade80' }}>{unread}</div>
+            <div className="label">Unread</div>
+          </div>
+          <div className="stat-box">
+            <div className="value" style={{ color: '#fbbf24' }}>{stats.analytics?.total || 0}</div>
+            <div className="label">Sent Today</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Polling Comparison Panel ──────────────────────────────
+
+    function PollingPanel({ userId }) {
+      const [shortData, setShortData] = useState({ log: [], requests: 0 });
+      const [longData, setLongData] = useState({ log: [], requests: 0 });
+      const [sseData, setSseData] = useState({ log: [], requests: 0 });
+      const sseRef = useRef(null);
+      const shortTimer = useRef(null);
+      const [running, setRunning] = useState(false);
+
+      const startPolling = useCallback(() => {
+        setRunning(true);
+
+        // Short polling — every 3 seconds
+        let shortReqs = 0;
+        shortTimer.current = setInterval(async () => {
+          const since = shortData.log[0]?.timestamp || new Date(Date.now() - 60000).toISOString();
+          const data = await api(`/polling/short?userId=${userId}&since=${since}`);
+          shortReqs++;
+          setShortData(prev => ({
+            requests: shortReqs,
+            log: data.hasNew
+              ? [{ ...data, time: new Date().toLocaleTimeString(), isNew: true }, ...prev.log].slice(0, 20)
+              : [{ empty: true, time: new Date().toLocaleTimeString() }, ...prev.log].slice(0, 20),
+          }));
+        }, 3000);
+
+        // Long polling — recursive
+        let longReqs = 0;
+        async function longPoll() {
+          try {
+            const data = await api(`/polling/long?userId=${userId}&timeout=15`);
+            longReqs++;
+            setLongData(prev => ({
+              requests: longReqs,
+              log: [{ ...data, time: new Date().toLocaleTimeString(), isNew: data.hasNew }, ...prev.log].slice(0, 20),
+            }));
+            longPoll(); // Reconnect immediately
+          } catch (e) {
+            setTimeout(longPoll, 1000);
+          }
+        }
+        longPoll();
+
+        // SSE — one connection
+        let sseReqs = 1;
+        const source = new EventSource(`${API}/polling/stream?userId=${userId}`);
+        sseRef.current = source;
+
+        source.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          setSseData(prev => ({
+            requests: sseReqs,
+            log: [{ ...data, time: new Date().toLocaleTimeString(), isNew: data.type === 'notification' }, ...prev.log].slice(0, 20),
+          }));
+        };
+
+        source.onerror = () => {
+          setSseData(prev => ({
+            ...prev,
+            log: [{ error: true, time: new Date().toLocaleTimeString() }, ...prev.log].slice(0, 20),
+          }));
+        };
+      }, [userId]);
+
+      const stopPolling = useCallback(() => {
+        setRunning(false);
+        clearInterval(shortTimer.current);
+        if (sseRef.current) sseRef.current.close();
+        // Long poll will stop on next request failure
+      }, []);
+
+      useEffect(() => {
+        return () => stopPolling();
+      }, []);
+
+      return (
+        <div className="card grid-full">
+          <div className="card-title">
+            ⚡ Polling Strategies — Live Comparison
+            <div>
+              {!running ? (
+                <button className="btn btn-green" onClick={startPolling}>Start All</button>
+              ) : (
+                <button className="btn btn-red" onClick={stopPolling}>Stop All</button>
+              )}
+            </div>
+          </div>
+          <div className="polling-grid">
+            <PollCard
+              title="🔄 Short Polling"
+              badge="Every 3s"
+              badgeClass="badge-blue"
+              requests={shortData.requests}
+              log={shortData.log}
+            />
+            <PollCard
+              title="⏳ Long Polling"
+              badge="Holds connection"
+              badgeClass="badge-green"
+              requests={longData.requests}
+              log={longData.log}
+            />
+            <PollCard
+              title="📡 SSE"
+              badge="Persistent stream"
+              badgeClass="badge-yellow"
+              requests={sseData.requests}
+              log={sseData.log}
+            />
+            <div className="poll-card">
+              <h4>🔌 WebSocket</h4>
+              <div className="metric">Status: <span>Not implemented</span></div>
+              <div className="metric">Protocol: <span>ws://</span></div>
+              <div style={{ marginTop: 10, fontSize: 11, color: '#64748b' }}>
+                WebSocket requires the <code>ws</code> library. For notifications, SSE is simpler and sufficient.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PollCard({ title, badge, badgeClass, requests, log }) {
+      return (
+        <div className="poll-card">
+          <h4>{title} <span className={`badge ${badgeClass}`}>{badge}</span></h4>
+          <div className="metric">Requests: <span>{requests}</span></div>
+          <div className="metric">Events: <span>{log.filter(l => l.isNew).length}</span></div>
+          <div className="log">
+            {log.map((entry, i) => (
+              <div key={i} className={`entry ${entry.isNew ? 'new' : ''}`}>
+                {entry.time} — {entry.isNew ? '✅ new data' : entry.error ? '❌ error' : '⬜ empty'}
+              </div>
+            ))}
+            {log.length === 0 && <div className="entry">Waiting...</div>}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Notification Feed ─────────────────────────────────────
+
+    function FeedPanel({ feed, unread, userId, onRefresh }) {
+      return (
+        <div className="card">
+          <div className="card-title">
+            📋 Notification Feed
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span className="badge badge-blue">{unread} unread</span>
+              {unread > 0 && (
+                <button className="btn btn-ghost" onClick={async () => {
+                  await api(`/unread/${userId}/read`, { method: 'POST' });
+                  onRefresh();
+                }}>
+                  Mark Read
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="notification-list">
+            {feed.length === 0 && (
+              <div className="empty-state">No notifications yet. Send one above!</div>
+            )}
+            {feed.map((n, i) => (
+              <div key={i} className="notification-item">
+                <div className="notification-icon">{channelIcon(n.channel)}</div>
+                <div className="notification-content">
+                  <div className="title">{n.title || n.type}</div>
+                  {n.body && <div className="body">{n.body}</div>}
+                  <div className="time">{n.channel} · {timeAgo(n.createdAt)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Analytics Panel ───────────────────────────────────────
+
+    function AnalyticsPanel({ analytics }) {
+      const total = analytics.total || 1;
+      return (
+        <div className="card">
+          <div className="card-title">
+            📊 Today's Analytics
+            <span className="badge badge-green">{analytics.total || 0} total</span>
+          </div>
+          {['email', 'sms', 'push'].map(ch => {
+            const count = analytics.byChannel?.[ch] || 0;
+            const pct = total > 0 ? (count / total) * 100 : 0;
+            return (
+              <div key={ch} className="analytics-bar">
+                <div className="label">{channelIcon(ch)} {ch}</div>
+                <div className="bar-bg">
+                  <div
+                    className={`bar-fill bar-${ch}`}
+                    style={{ width: `${Math.max(pct, 2)}%` }}
+                  >
+                    {count}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ── DLQ Panel ─────────────────────────────────────────────
+
+    function DLQPanel({ dlq, onRefresh }) {
+      return (
+        <div className="card grid-full">
+          <div className="card-title">
+            💀 Dead Letter Queue
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span className="badge badge-red">{dlq.count || 0} dead</span>
+              {dlq.count > 0 && (
+                <button className="btn btn-blue" onClick={async () => {
+                  await api('/dlq/retry-all', { method: 'POST' });
+                  onRefresh();
+                }}>
+                  Retry All
+                </button>
+              )}
+            </div>
+          </div>
+          {(!dlq.jobs || dlq.jobs.length === 0) && (
+            <div className="empty-state">No dead letters. Failed jobs will appear here.</div>
+          )}
+          {dlq.jobs?.map((job, i) => (
+            <div key={i} className="dlq-item">
+              <div>{channelIcon(job.channel)}</div>
+              <div style={{ flex: 1 }}>
+                <div className="error">{job.lastError}</div>
+                <div className="meta">
+                  {job.channel} · {job.attempt}/{job.maxAttempts} attempts · {job.id.slice(0, 8)}
+                </div>
+              </div>
+              <button className="btn btn-blue" onClick={async () => {
+                await api(`/dlq/${job.id}/retry`, { method: 'POST' });
+                onRefresh();
+              }}>
+                Retry
+              </button>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── Main App ──────────────────────────────────────────────
+
+    function App() {
+      const [userId, setUserId] = useState(1);
+      const [stats, setStats] = useState({});
+      const [feed, setFeed] = useState([]);
+      const [unread, setUnread] = useState(0);
+      const [analytics, setAnalytics] = useState({});
+      const [dlq, setDlq] = useState({ count: 0, jobs: [] });
+
+      const refresh = useCallback(async () => {
+        try {
+          const [statsData, feedData, analyticsData, dlqData] = await Promise.all([
+            api('/queue/stats'),
+            api(`/feed/${userId}`),
+            api('/analytics'),
+            api('/dlq'),
+          ]);
+
+          setStats({ ...statsData, analytics: analyticsData });
+          setFeed(feedData.notifications || []);
+          setUnread(feedData.unreadCount || 0);
+          setAnalytics(analyticsData);
+          setDlq(dlqData);
+        } catch (e) {
+          console.error('Refresh error:', e);
+        }
+      }, [userId]);
+
+      // Auto-refresh every 5 seconds
+      useEffect(() => {
+        refresh();
+        const interval = setInterval(refresh, 5000);
+        return () => clearInterval(interval);
+      }, [refresh]);
+
+      return (
+        <div>
+          <div className="header">
+            <h1>🔔 <span>Notification Engine</span> Dashboard</h1>
+            <div className="header-controls">
+              <SendForm userId={userId} />
+              <label>User:</label>
+              <select value={userId} onChange={e => setUserId(Number(e.target.value))}>
+                {[1, 2, 3, 4, 5].map(id => (
+                  <option key={id} value={id}>User {id}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ padding: '20px 24px' }}>
+            <StatsRow stats={stats} unread={unread} />
+          </div>
+
+          <div className="grid">
+            <PollingPanel userId={userId} />
+            <FeedPanel feed={feed} unread={unread} userId={userId} onRefresh={refresh} />
+            <AnalyticsPanel analytics={analytics} />
+            <DLQPanel dlq={dlq} onRefresh={refresh} />
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
