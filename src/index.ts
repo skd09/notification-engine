@@ -2,6 +2,7 @@ import express from "express";
 import { Queue, Job } from "./queue";
 import { sendEmail, sendPush, sendSMS } from "./channels";
 import { randomUUID } from "crypto";
+import { NotificationStore } from "./store";
 
 
 const app = express();
@@ -9,16 +10,18 @@ app.use(express.json());
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const queue = new Queue(REDIS_URL);
+const store = new NotificationStore(REDIS_URL);
 
 
 // =================================================================
-// LAYER 3: RETRY + DEAD LETTER QUEUE
+// LAYER 4: REDIS DEEP DIVE
 //
-// New in this layer:
-//   - Jobs have attempt tracking (attempt/maxAttempts)
-//   - Failed jobs are retried with exponential backoff
-//   - After max retries, jobs move to Dead Letter Queue
-//   - DLQ API: view, retry one, retry all
+// New endpoints:
+//   GET  /feed/:userId → notification feed (Sorted Set)
+//   GET  /unread/:userId → unread count (Hash)
+//   POST /unread/:userId/read → mark all read (Hash)
+//   GET  /prefs/:userId → cached preferences (String + TTL)
+//   PUT  /prefs/:userId → update prefs + invalidate cache
 // =================================================================
 
 // ── Simulate External Services ──────────────────────────────────
@@ -36,7 +39,7 @@ app.post('/notify', async (req, res) => {
     const { userId, channel, subject, body, message, title } = req.body;
 
     if(!userId || !channel) {
-        return res.status(400).json({ error: 'Missing userId or channel' });
+        res.status(400).json({ error: 'Missing userId or channel' });
         return;
     }
 
@@ -55,12 +58,9 @@ app.post('/notify', async (req, res) => {
 
     const elapsed = Date.now() - startTime;
 
-    res.json({
+    res.status(202).json({
         status: 'queued',
         jobId: job.id,
-        channel,
-        userId,
-        maxAttempts: job.maxAttempts,
         elapsed: `${elapsed}ms`, // Time would be ~5ms for enqueue, vs 2000ms+ if we sent directly
         note: 'ASYNC — job queued, worker will process it in the background',
     });
@@ -157,6 +157,108 @@ app.post('/dlq/retry-all', async (req, res) => {
   });
 });
 
+// ── Notification Feed (Sorted Set) ─────────────────────────────
+
+app.get('/feed/:userId', async (req, res) => {
+    const userId = parseInt(req.params.userId, 10);
+    const count = parseInt(req.query.count as string, 10) || 20;
+
+    const feed = await store.getFeed(userId, count);
+    const feedSize = await store.getFeedSize(userId);
+    const unread = await store.getUnreadCount(userId);
+
+    res.json({
+        userId,
+        unreadCount: unread,
+        totalInFeed: feedSize,
+        notifications: feed,
+        redisStructure: 'Sorted Set (ZADD/ZREVRANGE)',
+    });
+});
+
+// ── Unread Counts (Hash) ────────────────────────────────────────
+
+
+app.get('/unread/:userId', async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const count = await store.getUnreadCount(userId);
+
+  res.json({
+    userId,
+    unreadCount: count,
+    redisStructure: 'Hash (HINCRBY/HGET)',
+  });
+});
+
+app.post('/unread/:userId/read', async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  await store.markAllRead(userId);
+
+  res.json({
+    userId,
+    unreadCount: 0,
+    note: 'All notifications marked as read',
+  });
+});
+
+app.get('/unread', async (req, res) => {
+  const allCounts = await store.getAllUnreadCounts();
+
+  res.json({
+    counts: allCounts,
+    redisStructure: 'Hash (HGETALL)',
+    note: 'All users unread counts in ONE Redis command',
+  });
+});
+
+// ── Cached Preferences (String with TTL) ────────────────────────
+// Simulate a "database" of user preferences
+const userPrefsDB: Record<number, any> = {
+  1: { email: true, sms: false, push: true, quietHoursStart: '22:00', quietHoursEnd: '08:00' },
+  2: { email: true, sms: true, push: true, quietHoursStart: '23:00', quietHoursEnd: '07:00' },
+  3: { email: false, sms: false, push: true, quietHoursStart: '21:00', quietHoursEnd: '09:00' },
+};
+
+app.get('/prefs/:userId', async (req, res) => {
+    const userId = parseInt(req.params.userId);
+    // Cache-aside pattern: check cache first, fallback to "DB"
+    const prefs = await store.cacheThrough(
+        `user_prefs:${userId}`,
+        3600, // Cache for 1 hour
+        async () => {
+            // This simulates a slow database query
+            console.log(`🐌 DB query for user ${userId} preferences (slow!)`);
+            await new Promise(r => setTimeout(r, 200)); // Simulate 200ms DB query
+            return userPrefsDB[userId] || { email: true, sms: true, push: true };
+    });
+
+    res.json({
+        userId,
+        preferences: prefs,
+        redisStructure: 'String with TTL (GET/SET EX)',
+        note: 'First request hits "DB", subsequent requests hit cache',
+    });
+});
+
+
+app.put('/prefs/:userId', async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const newPrefs = req.body;
+
+  // Update "database"
+  userPrefsDB[userId] = { ...userPrefsDB[userId], ...newPrefs };
+
+  // Invalidate cache — next GET will fetch fresh data
+  await store.cacheDelete(`user_prefs:${userId}`);
+
+  res.json({
+    userId,
+    preferences: userPrefsDB[userId],
+    note: 'Preferences updated, cache invalidated',
+  });
+});
+
+
 
 // ── Layer 1 endpoint still here for comparison ──────────────────
 
@@ -189,10 +291,4 @@ const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
     console.log(`API running on http://localhost:${PORT}\n`);
-    console.log(`POST /notify → queues job (fast, ~5ms)`);
-    console.log(`POST /notify/sync → sends directly (slow, Layer 1 comparison)`);
-    console.log(`GET  /queue/stats → see pending jobs\n`);
-    console.log(`GET  /dlq → view dead letter jobs`);
-    console.log(`POST /dlq/:id/retry → retry one dead letter`);
-    console.log(`POST /dlq/retry-all → retry all dead letters\n`);
 });

@@ -1,27 +1,17 @@
 import { Queue, Job } from "./queue";
+import { NotificationStore } from "./store";
 import { sendEmail, sendSMS, sendPush } from "./channels";
 
 // =================================================================
-// WORKER — Now with retry and DLQ support
-//
-// When a job fails:
-//   1. Catch the error
-//   2. Call queue.requeueForRetry() — this either:
-//      a. Puts it back in the queue with exponential backoff, OR
-//      b. Moves it to the DLQ if max attempts reached
-//   3. Continue processing next job
-//
-// The worker NEVER crashes on a failed job. It handles the error
-// gracefully and moves on.
+// WORKER — Now updates Redis feed + unread count after success
 // =================================================================
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const queue = new Queue(REDIS_URL);
+const store = new NotificationStore(REDIS_URL);
 
 async function processJob(job: Job): Promise<void> {
-    console.log(`Processing job ${job.id} for user ${job.userId} on channel ${job.channel}`);
-    const startTime = Date.now();
-
+    // 1. Send the notification 
     switch (job.channel) {
         case 'email':
             await sendEmail(job.userId, job.payload.subject, job.payload.body);
@@ -35,16 +25,30 @@ async function processJob(job: Job): Promise<void> {
         default:
             console.error(`Unknown channel ${job.channel} for job ${job.id}`);
     }
-    const elapsed = Date.now() - startTime;
-    console.log(`Finished job ${job.id} in ${elapsed}ms`);
+
+     // 2. NEW: Store in notification feed (Sorted Set)
+    await store.addToFeed(job.userId, {
+        id: job.id,
+        channel: job.channel,
+        type: job.payload.type,
+        title: job.payload.subject || job.payload.title || job.payload.message || '',
+        body: job.payload.body,
+    });
+
+    // 3. NEW: Increment unread count (Hash)
+    const newCount = await store.incrementUnread
+    console.log(`Feed updated, unread count: ${newCount}`);
 }
 
 async function startWorker(): Promise<void> {
     console.log('');
     console.log('='.repeat(50));
-    console.log('Worker started - waiting for jobs...');
-    console.log('  Retry policy: 3 attempts with exponential backoff');
-    console.log('  Failed jobs go to Dead Letter Queue');
+    console.log('Worker started');
+    console.log('Sends notifications');
+    console.log('Updates feed (Redis Sorted Set)');
+    console.log('Updates unread count (Redis Hash)');
+    console.log('Retries failed jobs (exponential backoff)');
+    console.log('Moves permanently failed jobs to DLQ');
     console.log('='.repeat(50));
     console.log('');
 
@@ -54,7 +58,6 @@ async function startWorker(): Promise<void> {
             // BRPOP — blocks until a job arrives (up to 5 second timeout)
             // If no job after 5 seconds, returns null, loop continues
             const job = await queue.dequeue(5);
-
             if(!job) continue;
 
             console.log(`\nProcessing job ${job.id} (${job.channel}) attempt ${job.attempt}/${job.maxAttempts}`);
