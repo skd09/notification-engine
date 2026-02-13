@@ -1,7 +1,7 @@
 import express from "express";
 import { Queue, Job } from "./queue";
 import { sendEmail, sendPush, sendSMS } from "./channels";
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "crypto";
 
 
 const app = express();
@@ -12,15 +12,13 @@ const queue = new Queue(REDIS_URL);
 
 
 // =================================================================
-// LAYER 2: ASYNC WITH QUEUES
+// LAYER 3: RETRY + DEAD LETTER QUEUE
 //
-// The API no longer sends notifications directly.
-// Instead, it pushes a JOB to Redis and responds immediately.
-// A separate WORKER process picks up the job and sends it.
-//
-// Compare with Layer 1:
-//   Layer 1: POST /notify → await sendEmail() → response (2000ms)
-//   Layer 2: POST /notify → queue.enqueue()   → response (5ms!)
+// New in this layer:
+//   - Jobs have attempt tracking (attempt/maxAttempts)
+//   - Failed jobs are retried with exponential backoff
+//   - After max retries, jobs move to Dead Letter Queue
+//   - DLQ API: view, retry one, retry all
 // =================================================================
 
 // ── Simulate External Services ──────────────────────────────────
@@ -39,6 +37,7 @@ app.post('/notify', async (req, res) => {
 
     if(!userId || !channel) {
         return res.status(400).json({ error: 'Missing userId or channel' });
+        return;
     }
 
     const job: Job = {
@@ -48,6 +47,8 @@ app.post('/notify', async (req, res) => {
         userId,
         payload: { subject, body, message, title },
         createdAt: new Date().toISOString(),
+        attempt: 0,
+        maxAttempts: 3,
     };
 
     await queue.enqueue(job);
@@ -59,6 +60,7 @@ app.post('/notify', async (req, res) => {
         jobId: job.id,
         channel,
         userId,
+        maxAttempts: job.maxAttempts,
         elapsed: `${elapsed}ms`, // Time would be ~5ms for enqueue, vs 2000ms+ if we sent directly
         note: 'ASYNC — job queued, worker will process it in the background',
     });
@@ -85,14 +87,17 @@ app.post('/notify/multi', async (req, res) => {
         userId,
         payload: { subject, body, message, title },
         createdAt: new Date().toISOString(),
+        attempt: 0,
+        maxAttempts: 3,
       };
+
       await queue.enqueue(job);
       jobs.push(job);
     }
 
     const totalElapsed = Date.now() - startTime;
 
-    res.status(200).json({
+    res.status(202).json({
         status: 'queued',
         jobCount: jobs.length,
         totalElapsedTime: `${totalElapsed} ms`,   // ~10ms for ALL channels (vs ~4500ms)
@@ -103,11 +108,53 @@ app.post('/notify/multi', async (req, res) => {
 // GET /queue/stats — See what's in the queue
 app.get('/queue/stats', async (req, res) => {
     const size = await queue.size();
-    const pending = await queue.peek(5); // Peek at the next 5 jobs without removing them
+    const dlqSize = await queue.dlqSize();
+
     res.json({ 
         queueSize: size,
-        pendingJobs: pending
+        dlqSize: dlqSize
     });
+});
+
+// ── Dead Letter Queue API ───────────────────────────────────────
+
+// GET /dlq — View all dead letter jobs
+app.get('/dlq', async (req, res) => {
+    const deadJobs = await queue.getDLQ();
+    const dlqSize = await queue.dlqSize();
+
+    res.json({ 
+        dlqSize,
+        deadJobs
+    });
+});
+
+// POST /dlq/:jobId/retry — Retry a specific dead letter job
+app.post('/dlq/:jobId/retry', async (req, res) => {
+    const { jobId } = req.params;
+    const success = await queue.retryFromDLQ(jobId);
+
+    if(!success) {
+        res.status(404).json({ error: `Job ${jobId} not found in DLQ` });
+        return;
+    }
+
+    res.json({
+        status: 'retrying',
+        jobId,
+        note: 'Job moved from DLQ back to main queue',
+    });
+});
+
+// POST /dlq/retry-all — Retry ALL dead letter jobs
+app.post('/dlq/retry-all', async (req, res) => {
+  const count = await queue.retryAllDLQ();
+
+  res.json({
+    status: 'retrying',
+    count,
+    note: `${count} jobs moved from DLQ back to main queue`,
+  });
 });
 
 
@@ -142,7 +189,10 @@ const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
     console.log(`API running on http://localhost:${PORT}\n`);
-    console.log(`POST /notify       → queues job (fast, ~5ms)`);
-    console.log(`POST /notify/sync  → sends directly (slow, Layer 1 comparison)`);
-    console.log(`GET  /queue/stats  → see pending jobs\n`);
+    console.log(`POST /notify → queues job (fast, ~5ms)`);
+    console.log(`POST /notify/sync → sends directly (slow, Layer 1 comparison)`);
+    console.log(`GET  /queue/stats → see pending jobs\n`);
+    console.log(`GET  /dlq → view dead letter jobs`);
+    console.log(`POST /dlq/:id/retry → retry one dead letter`);
+    console.log(`POST /dlq/retry-all → retry all dead letters\n`);
 });

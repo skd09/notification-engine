@@ -2,25 +2,17 @@ import { Queue, Job } from "./queue";
 import { sendEmail, sendSMS, sendPush } from "./channels";
 
 // =================================================================
-// WORKER — Pulls jobs from the queue and processes them
-// =================================================================
+// WORKER — Now with retry and DLQ support
 //
-// This runs as a SEPARATE PROCESS from the API server.
-// 
-// It does one thing in a loop:
-//   1. BRPOP — wait for a job from Redis (blocks if empty)
-//   2. Process the job (send email/SMS/push)
-//   3. Go back to step 1
+// When a job fails:
+//   1. Catch the error
+//   2. Call queue.requeueForRetry() — this either:
+//      a. Puts it back in the queue with exponential backoff, OR
+//      b. Moves it to the DLQ if max attempts reached
+//   3. Continue processing next job
 //
-// The API server and worker NEVER talk directly.
-// They communicate ONLY through Redis:
-//   API → LPUSH job into Redis
-//   Worker → BRPOP job out of Redis
-//
-// This is the DECOUPLING that makes queues powerful:
-//   - API can be on server A, worker on server B
-//   - You can run 1 worker or 20 workers (just start more)
-//   - If the worker crashes, jobs stay safe in Redis
+// The worker NEVER crashes on a failed job. It handles the error
+// gracefully and moves on.
 // =================================================================
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -51,6 +43,8 @@ async function startWorker(): Promise<void> {
     console.log('');
     console.log('='.repeat(50));
     console.log('Worker started - waiting for jobs...');
+    console.log('  Retry policy: 3 attempts with exponential backoff');
+    console.log('  Failed jobs go to Dead Letter Queue');
     console.log('='.repeat(50));
     console.log('');
 
@@ -61,10 +55,23 @@ async function startWorker(): Promise<void> {
             // If no job after 5 seconds, returns null, loop continues
             const job = await queue.dequeue(5);
 
-            if(job){
+            if(!job) continue;
+
+            console.log(`\nProcessing job ${job.id} (${job.channel}) attempt ${job.attempt}/${job.maxAttempts}`);
+            const startTime = Date.now();
+
+            try {
                 await processJob(job);
+                const elapsed = Date.now() - startTime;
+                console.log(`✅ Job ${job.id} completed successfully in ${elapsed}ms`);
+            } catch (err) {
+                // JOB FAILED — don't crash, handle it gracefully
+                const errorMessage = err instanceof Error ? err.message: 'Unknown error';
+                console.error(`❌ Job ${job.id} failed:`, errorMessage);
+
+                // This will either retry or move to DLQ
+                await queue.requestForRetry(job, errorMessage);
             }
-             // If null, just loop again — BRPOP will wait for the next job
         } catch (err) {
             console.error('❌ Worker error:', err);
             // Don't crash — wait a bit and try again
