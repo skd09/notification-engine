@@ -24,7 +24,7 @@ export async function sendEmail(userId: number, subject: String, body: String): 
     console.log(`Email sent to user ${userId}`);
 }
 
-export async function sendSMS(userId: string, message: String): Promise<void> {
+export async function sendSMS(userId: number, message: String): Promise<void> {
     console.log(`Sending SMS to user ${userId}: ${message}`);
     await sleep(1000 + Math.random() * 500); // Simulate 1-1.5 seconds latency
 
@@ -35,7 +35,7 @@ export async function sendSMS(userId: string, message: String): Promise<void> {
     console.log(`SMS sent to user ${userId}`);
 }
 
-export async function sendPush(userId: string, title: String, message: String): Promise<void> {
+export async function sendPush(userId: number, title: String, message: String): Promise<void> {
     console.log(`Sending push notification to user ${userId}: ${title} - ${message}`);
     await sleep(500 + Math.random() * 500); // Simulate 0.5-1 second latency
 
