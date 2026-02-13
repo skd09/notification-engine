@@ -1,0 +1,30 @@
+services: 
+  app:
+    build: .
+    container_name: notification-app
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./src:/app/src
+    environment:
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+  
+  worker:
+    build: .
+    container_name: notfication-worker
+    volumes:
+      - ./src:/app/src
+    environment:
+      REDIS_URL: redis://redis:6379
+    command: npx ts-node src/worker.ts
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: notification-redis
+    ports:
+      - "6379:6379"
