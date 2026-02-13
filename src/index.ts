@@ -1,6 +1,7 @@
 import express from 'express';
 import { Queue, Job } from './queue';
 import { NotificationStore } from './store';
+import { PollingHandlers } from './polling';
 import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 
@@ -10,15 +11,8 @@ app.use(express.json());
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const queue = new Queue(REDIS_URL);
 const store = new NotificationStore(REDIS_URL);
+const polling = new PollingHandlers(REDIS_URL, store);
 const redis = new Redis(REDIS_URL);
-
-// =================================================================
-// LAYER 5: PUB/SUB + POINT-TO-POINT
-//
-// New: Analytics endpoint (powered by Subscriber 3)
-// The API doesn't compute analytics — it just reads what the
-// analytics subscriber has been writing to Redis.
-// =================================================================
 
 
 // ── Notification Endpoints ──────────────────────────────────────
@@ -79,14 +73,13 @@ app.post('/notify/multi', async (req, res) => {
 });
 
 
-// ── Feed + Unread (same as Layer 4) ─────────────────────────────
+// ── Feed + Unread ───────────────────────────────────────────────
 
 app.get('/feed/:userId', async (req, res) => {
   const userId = parseInt(req.params.userId);
   const count = parseInt(req.query.count as string) || 20;
   const feed = await store.getFeed(userId, count);
   const unread = await store.getUnreadCount(userId);
-
   res.json({ userId, unreadCount: unread, notifications: feed });
 });
 
@@ -108,7 +101,7 @@ app.get('/unread', async (req, res) => {
 });
 
 
-// ── Cached Preferences (same as Layer 4) ────────────────────────
+// ── Cached Preferences ─────────────────────────────────────────
 
 const userPrefsDB: Record<number, any> = {
   1: { email: true, sms: false, push: true },
@@ -133,12 +126,11 @@ app.put('/prefs/:userId', async (req, res) => {
 });
 
 
-// ── Analytics (NEW — powered by Subscriber 3) ──────────────────
+// ── Analytics ───────────────────────────────────────────────────
 
 app.get('/analytics', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
   const data = await redis.hgetall(`analytics:${today}`);
-
   res.json({
     date: today,
     total: parseInt(data.total || '0', 10),
@@ -147,9 +139,17 @@ app.get('/analytics', async (req, res) => {
       sms: parseInt(data['channel:sms'] || '0', 10),
       push: parseInt(data['channel:push'] || '0', 10),
     },
-    note: 'Powered by Pub/Sub Subscriber 3 — analytics are updated independently of notification sending',
   });
 });
+
+
+// ── 4 Polling Strategies ────────────────────────────────────────
+
+app.get('/polling/short', (req, res) => polling.shortPoll(req, res));
+app.get('/polling/long', (req, res) => polling.longPoll(req, res));
+app.get('/polling/stream', (req, res) => polling.sseStream(req, res));
+app.get('/polling/websocket', (req, res) => polling.websocketInfo(req, res));
+app.get('/polling/compare', (req, res) => polling.comparison(req, res));
 
 
 // ── Queue + DLQ ─────────────────────────────────────────────────
@@ -180,20 +180,22 @@ app.post('/dlq/retry-all', async (req, res) => {
 });
 
 
-// ── Architecture Info ───────────────────────────────────────────
+// ── Health + Info ───────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    layer: 'Layer 5: Pub/Sub + Point-to-Point',
-    architecture: {
-      'Point-to-Point': 'API → Redis Queue → ONE worker sends notification',
-      'Pub/Sub': 'Worker → PUBLISH event → ALL subscribers react independently',
-      subscribers: [
-        'Subscriber 1: Update feed (Sorted Set)',
-        'Subscriber 2: Update unread count (Hash)',
-        'Subscriber 3: Log analytics (Hash)',
-      ],
+    layer: 'Layer 6: Complete Notification Engine',
+    endpoints: {
+      notify: 'POST /notify, POST /notify/multi',
+      feed: 'GET /feed/:userId',
+      unread: 'GET /unread/:userId, POST /unread/:userId/read',
+      cache: 'GET /prefs/:userId, PUT /prefs/:userId',
+      analytics: 'GET /analytics',
+      polling: 'GET /polling/short, /polling/long, /polling/stream, /polling/websocket',
+      comparison: 'GET /polling/compare',
+      queue: 'GET /queue/stats',
+      dlq: 'GET /dlq, POST /dlq/:id/retry, POST /dlq/retry-all',
     },
   });
 });
@@ -202,5 +204,25 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
-  console.log(`\n API is running on http://localhost:${PORT}`);
+  console.log('');
+  console.log('='.repeat(60));
+  console.log('  Notification Engine — All 6 Layers Complete!');
+  console.log('='.repeat(60));
+  console.log('');
+  console.log('  Endpoints:');
+  console.log(`  POST /notify              Queue notification`);
+  console.log(`  GET  /feed/:userId         Notification feed`);
+  console.log(`  GET  /unread/:userId       Unread count`);
+  console.log(`  GET  /analytics            Daily analytics`);
+  console.log('');
+  console.log('  Polling Strategies:');
+  console.log(`  GET  /polling/short        Short polling`);
+  console.log(`  GET  /polling/long         Long polling (holds connection)`);
+  console.log(`  GET  /polling/stream       SSE (server pushes events)`);
+  console.log(`  GET  /polling/websocket    WebSocket info`);
+  console.log(`  GET  /polling/compare      Compare all strategies`);
+  console.log('');
+  console.log(`  Running on http://localhost:${PORT}`);
+  console.log('='.repeat(60));
+  console.log('');
 });
