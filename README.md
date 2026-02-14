@@ -1,4 +1,4 @@
-# 🔔 Real-Time Notification Engine
+# Real-Time Notification Engine
 
 A notification system built from scratch in Node.js/TypeScript to demonstrate core distributed systems concepts. Every component — queues, retry logic, dead letter queues, pub/sub, caching, and real-time delivery — is implemented from first principles with no abstraction libraries.
 
